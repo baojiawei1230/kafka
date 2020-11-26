@@ -16,14 +16,15 @@
  */
 package org.apache.kafka.streams.state.internals;
 
-import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.kstream.Windowed;
 import org.apache.kafka.streams.kstream.internals.SessionWindow;
+import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.processor.StateStoreContext;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.internals.ProcessorContextImpl;
 import org.apache.kafka.streams.state.SessionStore;
-import org.apache.kafka.test.NoOpRecordCollector;
+import org.apache.kafka.test.MockRecordCollector;
 import org.easymock.EasyMock;
 import org.easymock.EasyMockRunner;
 import org.easymock.Mock;
@@ -32,30 +33,11 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-
 @RunWith(EasyMockRunner.class)
 public class ChangeLoggingSessionBytesStoreTest {
 
     private final TaskId taskId = new TaskId(0, 0);
-    private final Map<Object, Object> sent = new HashMap<>();
-    private final NoOpRecordCollector collector = new NoOpRecordCollector() {
-        @Override
-        public <K, V> void send(final String topic,
-                                K key,
-                                V value,
-                                Integer partition,
-                                Long timestamp,
-                                Serializer<K> keySerializer,
-                                Serializer<V> valueSerializer) {
-            sent.put(key, value);
-        }
-    };
+    private final MockRecordCollector collector = new MockRecordCollector();
 
     @Mock(type = MockType.NICE)
     private SessionStore<Bytes, byte[]> inner;
@@ -75,11 +57,30 @@ public class ChangeLoggingSessionBytesStoreTest {
     private void init() {
         EasyMock.expect(context.taskId()).andReturn(taskId);
         EasyMock.expect(context.recordCollector()).andReturn(collector);
-        inner.init(context, store);
+        inner.init((StateStoreContext) context, store);
         EasyMock.expectLastCall();
         EasyMock.replay(inner, context);
 
-        store.init(context, store);
+        store.init((StateStoreContext) context, store);
+    }
+
+    @SuppressWarnings("deprecation")
+    @Test
+    public void shouldDelegateDeprecatedInit() {
+        inner.init((ProcessorContext) context, store);
+        EasyMock.expectLastCall();
+        EasyMock.replay(inner);
+        store.init((ProcessorContext) context, store);
+        EasyMock.verify(inner);
+    }
+
+    @Test
+    public void shouldDelegateInit() {
+        inner.init((StateStoreContext) context, store);
+        EasyMock.expectLastCall();
+        EasyMock.replay(inner);
+        store.init((StateStoreContext) context, store);
+        EasyMock.verify(inner);
     }
 
     @Test
@@ -89,10 +90,15 @@ public class ChangeLoggingSessionBytesStoreTest {
 
         init();
 
+        final Bytes binaryKey = SessionKeySchema.toBinary(key1);
+
+        EasyMock.reset(context);
+        context.logChange(store.name(), binaryKey, value1, 0L);
+
+        EasyMock.replay(context);
         store.put(key1, value1);
 
-        assertArrayEquals(value1, (byte[]) sent.get(Bytes.wrap(SessionKeySchema.toBinary(key1))));
-        EasyMock.verify(inner);
+        EasyMock.verify(inner, context);
     }
 
     @Test
@@ -103,15 +109,20 @@ public class ChangeLoggingSessionBytesStoreTest {
         init();
         store.remove(key1);
 
-        final Bytes binaryKey = Bytes.wrap(SessionKeySchema.toBinary(key1));
-        assertTrue(sent.containsKey(binaryKey));
-        assertNull(sent.get(binaryKey));
-        EasyMock.verify(inner);
+        final Bytes binaryKey = SessionKeySchema.toBinary(key1);
+
+        EasyMock.reset(context);
+        context.logChange(store.name(), binaryKey, null, 0L);
+
+        EasyMock.replay(context);
+        store.remove(key1);
+
+        EasyMock.verify(inner, context);
     }
 
     @Test
     public void shouldDelegateToUnderlyingStoreWhenFetching() {
-        EasyMock.expect(inner.findSessions(bytesKey, 0, Long.MAX_VALUE)).andReturn(KeyValueIterators.<Windowed<Bytes>, byte[]>emptyIterator());
+        EasyMock.expect(inner.fetch(bytesKey)).andReturn(KeyValueIterators.emptyIterator());
 
         init();
 
@@ -120,8 +131,18 @@ public class ChangeLoggingSessionBytesStoreTest {
     }
 
     @Test
+    public void shouldDelegateToUnderlyingStoreWhenBackwardFetching() {
+        EasyMock.expect(inner.backwardFetch(bytesKey)).andReturn(KeyValueIterators.emptyIterator());
+
+        init();
+
+        store.backwardFetch(bytesKey);
+        EasyMock.verify(inner);
+    }
+
+    @Test
     public void shouldDelegateToUnderlyingStoreWhenFetchingRange() {
-        EasyMock.expect(inner.findSessions(bytesKey, bytesKey, 0, Long.MAX_VALUE)).andReturn(KeyValueIterators.<Windowed<Bytes>, byte[]>emptyIterator());
+        EasyMock.expect(inner.fetch(bytesKey, bytesKey)).andReturn(KeyValueIterators.emptyIterator());
 
         init();
 
@@ -130,8 +151,18 @@ public class ChangeLoggingSessionBytesStoreTest {
     }
 
     @Test
+    public void shouldDelegateToUnderlyingStoreWhenBackwardFetchingRange() {
+        EasyMock.expect(inner.backwardFetch(bytesKey, bytesKey)).andReturn(KeyValueIterators.emptyIterator());
+
+        init();
+
+        store.backwardFetch(bytesKey, bytesKey);
+        EasyMock.verify(inner);
+    }
+
+    @Test
     public void shouldDelegateToUnderlyingStoreWhenFindingSessions() {
-        EasyMock.expect(inner.findSessions(bytesKey, 0, 1)).andReturn(KeyValueIterators.<Windowed<Bytes>, byte[]>emptyIterator());
+        EasyMock.expect(inner.findSessions(bytesKey, 0, 1)).andReturn(KeyValueIterators.emptyIterator());
 
         init();
 
@@ -140,12 +171,32 @@ public class ChangeLoggingSessionBytesStoreTest {
     }
 
     @Test
+    public void shouldDelegateToUnderlyingStoreWhenBackwardFindingSessions() {
+        EasyMock.expect(inner.backwardFindSessions(bytesKey, 0, 1)).andReturn(KeyValueIterators.emptyIterator());
+
+        init();
+
+        store.backwardFindSessions(bytesKey, 0, 1);
+        EasyMock.verify(inner);
+    }
+
+    @Test
     public void shouldDelegateToUnderlyingStoreWhenFindingSessionRange() {
-        EasyMock.expect(inner.findSessions(bytesKey, bytesKey, 0, 1)).andReturn(KeyValueIterators.<Windowed<Bytes>, byte[]>emptyIterator());
+        EasyMock.expect(inner.findSessions(bytesKey, bytesKey, 0, 1)).andReturn(KeyValueIterators.emptyIterator());
 
         init();
 
         store.findSessions(bytesKey, bytesKey, 0, 1);
+        EasyMock.verify(inner);
+    }
+
+    @Test
+    public void shouldDelegateToUnderlyingStoreWhenBackwardFindingSessionRange() {
+        EasyMock.expect(inner.backwardFindSessions(bytesKey, bytesKey, 0, 1)).andReturn(KeyValueIterators.emptyIterator());
+
+        init();
+
+        store.backwardFindSessions(bytesKey, bytesKey, 0, 1);
         EasyMock.verify(inner);
     }
 

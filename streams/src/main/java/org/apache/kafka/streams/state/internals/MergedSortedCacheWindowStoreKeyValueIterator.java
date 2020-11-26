@@ -35,9 +35,10 @@ class MergedSortedCacheWindowStoreKeyValueIterator
         final KeyValueIterator<Windowed<Bytes>, byte[]> underlyingIterator,
         final StateSerdes<Bytes, byte[]> serdes,
         final long windowSize,
-        final SegmentedCacheFunction cacheFunction
+        final SegmentedCacheFunction cacheFunction,
+        final boolean forward
     ) {
-        super(filteredCacheIterator, underlyingIterator);
+        super(filteredCacheIterator, underlyingIterator, forward);
         this.serdes = serdes;
         this.windowSize = windowSize;
         this.cacheFunction = cacheFunction;
@@ -56,12 +57,12 @@ class MergedSortedCacheWindowStoreKeyValueIterator
     @Override
     Windowed<Bytes> deserializeCacheKey(final Bytes cacheKey) {
         final byte[] binaryKey = cacheFunction.key(cacheKey).get();
-        return WindowKeySchema.fromStoreKey(binaryKey, windowSize, serdes);
+        return WindowKeySchema.fromStoreKey(binaryKey, windowSize, serdes.keyDeserializer(), serdes.topic());
     }
 
     @Override
     byte[] deserializeCacheValue(final LRUCacheEntry cacheEntry) {
-        return cacheEntry.value;
+        return cacheEntry.value();
     }
 
     @Override

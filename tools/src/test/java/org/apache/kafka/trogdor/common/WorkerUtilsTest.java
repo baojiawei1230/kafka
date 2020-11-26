@@ -17,31 +17,33 @@
 
 package org.apache.kafka.trogdor.common;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-
-import org.apache.kafka.clients.admin.TopicDescription;
-import org.apache.kafka.common.TopicPartitionInfo;
-
-import org.apache.kafka.common.Node;
 import org.apache.kafka.clients.admin.MockAdminClient;
-
+import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.Node;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.errors.TopicExistsException;
+import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.utils.Utils;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.kafka.clients.admin.NewTopic;
-import org.junit.Before;
-import org.junit.Test;
-import static org.junit.Assert.assertEquals;
-
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-
+import java.util.Properties;
 
 public class WorkerUtilsTest {
 
@@ -62,8 +64,8 @@ public class WorkerUtilsTest {
     private MockAdminClient adminClient;
 
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp() {
         adminClient = new MockAdminClient(cluster, broker1);
     }
 
@@ -106,7 +108,7 @@ public class WorkerUtilsTest {
         assertEquals(0, adminClient.listTopics().names().get().size());
     }
 
-    @Test(expected = TopicExistsException.class)
+    @Test
     public void testCreateTopicsFailsIfAtLeastOneTopicExists() throws Throwable {
         adminClient.addTopic(
             false,
@@ -121,10 +123,10 @@ public class WorkerUtilsTest {
         newTopics.put("one-more-topic",
                       new NewTopic("one-more-topic", TEST_PARTITIONS, TEST_REPLICATION_FACTOR));
 
-        WorkerUtils.createTopics(log, adminClient, newTopics, true);
+        assertThrows(TopicExistsException.class, () -> WorkerUtils.createTopics(log, adminClient, newTopics, true));
     }
 
-    @Test(expected = RuntimeException.class)
+    @Test
     public void testExistingTopicsMustHaveRequestedNumberOfPartitions() throws Throwable {
         List<TopicPartitionInfo> tpInfo = new ArrayList<>();
         tpInfo.add(new TopicPartitionInfo(0, broker1, singleReplica, Collections.<Node>emptyList()));
@@ -135,8 +137,8 @@ public class WorkerUtilsTest {
             tpInfo,
             null);
 
-        WorkerUtils.createTopics(
-            log, adminClient, Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), false);
+        assertThrows(RuntimeException.class, () -> WorkerUtils.createTopics(
+            log, adminClient, Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), false));
     }
 
     @Test
@@ -208,4 +210,123 @@ public class WorkerUtilsTest {
         assertEquals(0, adminClient.listTopics().names().get().size());
     }
 
+    @Test
+    public void testAddConfigsToPropertiesAddsAllConfigs() {
+        Properties props = new Properties();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        props.put(ProducerConfig.ACKS_CONFIG, "all");
+
+        Properties resultProps = new Properties();
+        resultProps.putAll(props);
+        resultProps.put(ProducerConfig.CLIENT_ID_CONFIG, "test-client");
+        resultProps.put(ProducerConfig.LINGER_MS_CONFIG, "1000");
+
+        WorkerUtils.addConfigsToProperties(
+            props,
+            Collections.singletonMap(ProducerConfig.CLIENT_ID_CONFIG, "test-client"),
+            Collections.singletonMap(ProducerConfig.LINGER_MS_CONFIG, "1000"));
+        assertEquals(resultProps, props);
+    }
+
+    @Test
+    public void testCommonConfigOverwritesDefaultProps() {
+        Properties props = new Properties();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        props.put(ProducerConfig.ACKS_CONFIG, "all");
+
+        Properties resultProps = new Properties();
+        resultProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        resultProps.put(ProducerConfig.ACKS_CONFIG, "1");
+        resultProps.put(ProducerConfig.LINGER_MS_CONFIG, "1000");
+
+        WorkerUtils.addConfigsToProperties(
+            props,
+            Collections.singletonMap(ProducerConfig.ACKS_CONFIG, "1"),
+            Collections.singletonMap(ProducerConfig.LINGER_MS_CONFIG, "1000"));
+        assertEquals(resultProps, props);
+    }
+
+    @Test
+    public void testClientConfigOverwritesBothDefaultAndCommonConfigs() {
+        Properties props = new Properties();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        props.put(ProducerConfig.ACKS_CONFIG, "all");
+
+        Properties resultProps = new Properties();
+        resultProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        resultProps.put(ProducerConfig.ACKS_CONFIG, "0");
+
+        WorkerUtils.addConfigsToProperties(
+            props,
+            Collections.singletonMap(ProducerConfig.ACKS_CONFIG, "1"),
+            Collections.singletonMap(ProducerConfig.ACKS_CONFIG, "0"));
+        assertEquals(resultProps, props);
+    }
+
+    @Test
+    public void testGetMatchingTopicPartitionsCorrectlyMatchesExactTopicName() throws Throwable {
+        final String topic1 = "existing-topic";
+        final String topic2 = "another-topic";
+        makeExistingTopicWithOneReplica(topic1, 10);
+        makeExistingTopicWithOneReplica(topic2, 20);
+
+        Collection<TopicPartition> topicPartitions =
+            WorkerUtils.getMatchingTopicPartitions(adminClient, topic2, 0, 2);
+        assertEquals(
+            Utils.mkSet(
+                new TopicPartition(topic2, 0), new TopicPartition(topic2, 1),
+                new TopicPartition(topic2, 2)
+            ),
+            new HashSet<>(topicPartitions)
+        );
+    }
+
+    @Test
+    public void testGetMatchingTopicPartitionsCorrectlyMatchesTopics() throws Throwable {
+        final String topic1 = "test-topic";
+        final String topic2 = "another-test-topic";
+        final String topic3 = "one-more";
+        makeExistingTopicWithOneReplica(topic1, 10);
+        makeExistingTopicWithOneReplica(topic2, 20);
+        makeExistingTopicWithOneReplica(topic3, 30);
+
+        Collection<TopicPartition> topicPartitions =
+            WorkerUtils.getMatchingTopicPartitions(adminClient, ".*-topic$", 0, 1);
+        assertEquals(
+            Utils.mkSet(
+                new TopicPartition(topic1, 0), new TopicPartition(topic1, 1),
+                new TopicPartition(topic2, 0), new TopicPartition(topic2, 1)
+            ),
+            new HashSet<>(topicPartitions)
+        );
+    }
+
+    private void makeExistingTopicWithOneReplica(String topicName, int numPartitions) {
+        List<TopicPartitionInfo> tpInfo = new ArrayList<>();
+        int brokerIndex = 0;
+        for (int i = 0; i < numPartitions; ++i) {
+            Node broker = cluster.get(brokerIndex);
+            tpInfo.add(new TopicPartitionInfo(
+                i, broker, singleReplica, Collections.<Node>emptyList()));
+            brokerIndex = (brokerIndex + 1) % cluster.size();
+        }
+        adminClient.addTopic(
+            false,
+            topicName,
+            tpInfo,
+            null);
+    }
+
+    @Test
+    public void testVerifyTopics() throws Throwable {
+        Map<String, NewTopic> newTopics = Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC);
+        WorkerUtils.createTopics(log, adminClient, newTopics, true);
+        adminClient.setFetchesRemainingUntilVisible(TEST_TOPIC, 2);
+        WorkerUtils.verifyTopics(log, adminClient, Collections.singleton(TEST_TOPIC),
+            Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), 3, 1);
+        adminClient.setFetchesRemainingUntilVisible(TEST_TOPIC, 100);
+        assertThrows(UnknownTopicOrPartitionException.class, () ->
+            WorkerUtils.verifyTopics(log, adminClient, Collections.singleton(TEST_TOPIC),
+                Collections.singletonMap(TEST_TOPIC, NEW_TEST_TOPIC), 2, 1));
+    }
 }

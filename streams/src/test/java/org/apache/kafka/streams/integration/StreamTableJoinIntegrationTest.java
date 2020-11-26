@@ -20,6 +20,7 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KTable;
+import org.apache.kafka.streams.test.TestRecord;
 import org.apache.kafka.test.IntegrationTest;
 import org.junit.Before;
 import org.junit.Test;
@@ -31,7 +32,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-
 /**
  * Tests all available joins of Kafka Streams DSL.
  */
@@ -41,7 +41,7 @@ public class StreamTableJoinIntegrationTest extends AbstractJoinIntegrationTest 
     private KStream<Long, String> leftStream;
     private KTable<Long, String> rightTable;
 
-    public StreamTableJoinIntegrationTest(boolean cacheEnabled) {
+    public StreamTableJoinIntegrationTest(final boolean cacheEnabled) {
         super(cacheEnabled);
     }
 
@@ -57,56 +57,55 @@ public class StreamTableJoinIntegrationTest extends AbstractJoinIntegrationTest 
     }
 
     @Test
-    public void testInner() throws Exception {
+    public void testInner() {
         STREAMS_CONFIG.put(StreamsConfig.APPLICATION_ID_CONFIG, appID + "-inner");
 
-        final List<List<String>> expectedResult = Arrays.asList(
-                null,
-                null,
-                null,
-                null,
-                Collections.singletonList("B-a"),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                Collections.singletonList("D-d")
+        final List<List<TestRecord<Long, String>>> expectedResult = Arrays.asList(
+            null,
+            null,
+            null,
+            null,
+            Collections.singletonList(new TestRecord<>(ANY_UNIQUE_KEY, "B-a", null, 5L)),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            Collections.singletonList(new TestRecord<>(ANY_UNIQUE_KEY, "D-d", null,  15L))
         );
 
         leftStream.join(rightTable, valueJoiner).to(OUTPUT_TOPIC);
-
-        runTest(expectedResult);
+        runTestWithDriver(expectedResult);
     }
 
     @Test
-    public void testLeft() throws Exception {
+    public void testLeft() {
         STREAMS_CONFIG.put(StreamsConfig.APPLICATION_ID_CONFIG, appID + "-left");
 
-        final List<List<String>> expectedResult = Arrays.asList(
-                null,
-                null,
-                Collections.singletonList("A-null"),
-                null,
-                Collections.singletonList("B-a"),
-                null,
-                null,
-                null,
-                Collections.singletonList("C-null"),
-                null,
-                null,
-                null,
-                null,
-                null,
-                Collections.singletonList("D-d")
+        final List<List<TestRecord<Long, String>>> expectedResult = Arrays.asList(
+            null,
+            null,
+            Collections.singletonList(new TestRecord<>(ANY_UNIQUE_KEY, "A-null", null, 3L)),
+            null,
+            Collections.singletonList(new TestRecord<>(ANY_UNIQUE_KEY, "B-a", null, 5L)),
+            null,
+            null,
+            null,
+            Collections.singletonList(new TestRecord<>(ANY_UNIQUE_KEY, "C-null", null, 9L)),
+            null,
+            null,
+            null,
+            null,
+            null,
+            Collections.singletonList(new TestRecord<>(ANY_UNIQUE_KEY, "D-d", null, 15L))
         );
 
         leftStream.leftJoin(rightTable, valueJoiner).to(OUTPUT_TOPIC);
 
-        runTest(expectedResult);
+        runTestWithDriver(expectedResult);
     }
 }

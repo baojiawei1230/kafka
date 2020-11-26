@@ -29,7 +29,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 
-public class MockScheduler implements Scheduler, MockTime.MockTimeListener {
+public class MockScheduler implements Scheduler, MockTime.Listener {
     private static final Logger log = LoggerFactory.getLogger(MockScheduler.class);
 
     /**
@@ -53,7 +53,7 @@ public class MockScheduler implements Scheduler, MockTime.MockTimeListener {
     }
 
     @Override
-    public synchronized void tick() {
+    public synchronized void onTimeUpdated() {
         long timeMs = time.milliseconds();
         while (true) {
             Map.Entry<Long, List<KafkaFutureImpl<Long>>> entry = waiters.firstEntry();
@@ -92,7 +92,7 @@ public class MockScheduler implements Scheduler, MockTime.MockTimeListener {
             public Void apply(final Long now) {
                 executor.submit(new Callable<Void>() {
                     @Override
-                    public Void call() throws Exception {
+                    public Void call() {
                         // Note: it is possible that we'll execute Callable#call right after
                         // the future is cancelled.  This is a valid sequence of events
                         // that the author of the Callable needs to be able to handle.

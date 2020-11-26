@@ -16,34 +16,45 @@
   */
 package kafka.server
 
+import kafka.admin.AdminOperationException
 import kafka.utils.CoreUtils._
 import kafka.zk.ZooKeeperTestHarness
 import org.apache.kafka.common.config._
 import org.junit.Test
 
-class DynamicConfigTest  extends ZooKeeperTestHarness {
+class DynamicConfigTest extends ZooKeeperTestHarness {
   private final val nonExistentConfig: String = "some.config.that.does.not.exist"
   private final val someValue: String = "some interesting value"
 
   @Test(expected = classOf[IllegalArgumentException])
-  def shouldFailWhenChangingClientIdUnknownConfig() {
+  def shouldFailWhenChangingClientIdUnknownConfig(): Unit = {
     adminZkClient.changeClientIdConfig("ClientId", propsWith(nonExistentConfig, someValue))
   }
 
   @Test(expected = classOf[IllegalArgumentException])
-  def shouldFailWhenChangingUserUnknownConfig() {
+  def shouldFailWhenChangingUserUnknownConfig(): Unit = {
     adminZkClient.changeUserOrUserClientIdConfig("UserId", propsWith(nonExistentConfig, someValue))
   }
 
   @Test(expected = classOf[ConfigException])
-  def shouldFailLeaderConfigsWithInvalidValues() {
+  def shouldFailLeaderConfigsWithInvalidValues(): Unit = {
     adminZkClient.changeBrokerConfig(Seq(0),
       propsWith(DynamicConfig.Broker.LeaderReplicationThrottledRateProp, "-100"))
   }
 
   @Test(expected = classOf[ConfigException])
-  def shouldFailFollowerConfigsWithInvalidValues() {
+  def shouldFailFollowerConfigsWithInvalidValues(): Unit = {
     adminZkClient.changeBrokerConfig(Seq(0),
       propsWith(DynamicConfig.Broker.FollowerReplicationThrottledRateProp, "-100"))
+  }
+
+  @Test(expected = classOf[ConfigException])
+  def shouldFailIpConfigsWithInvalidValues(): Unit = {
+    adminZkClient.changeIpConfig("1.2.3.4", propsWith(DynamicConfig.Ip.IpConnectionRateOverrideProp, "-1"))
+  }
+
+  @Test(expected = classOf[AdminOperationException])
+  def shouldFailIpConfigsWithInvalidIpv4Entity(): Unit = {
+    adminZkClient.changeIpConfig("1,1.1.1", propsWith(DynamicConfig.Ip.IpConnectionRateOverrideProp, "2"));
   }
 }

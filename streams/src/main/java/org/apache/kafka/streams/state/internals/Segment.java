@@ -16,36 +16,13 @@
  */
 package org.apache.kafka.streams.state.internals;
 
-import org.apache.kafka.common.utils.Utils;
-import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.common.utils.Bytes;
+import org.apache.kafka.streams.state.KeyValueStore;
 
 import java.io.IOException;
 
-class Segment extends RocksDBStore implements Comparable<Segment> {
-    public final long id;
+public interface Segment extends KeyValueStore<Bytes, byte[]>, BatchWritingStore {
 
-    Segment(String segmentName, String windowName, long id) {
-        super(segmentName, windowName);
-        this.id = id;
-    }
+    void destroy() throws IOException;
 
-    void destroy() throws IOException {
-        Utils.delete(dbDir);
-    }
-
-    @Override
-    public int compareTo(Segment segment) {
-        return Long.compare(id, segment.id);
-    }
-
-    @Override
-    public void openDB(final ProcessorContext context) {
-        super.openDB(context);
-        // skip the registering step
-    }
-
-    @Override
-    public String toString() {
-        return "Segment(id=" + id + ", name=" + name() + ")";
-    }
 }
